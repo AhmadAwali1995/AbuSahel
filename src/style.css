@@ -1,0 +1,252 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f7f7f7;
+}
+
+#app {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mic-button {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+  height: 52px;
+  border: 1px solid #3a3a3a;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.9);
+  color: #f0f0f0;
+  font-size: 22px;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.mic-button:hover {
+  background: rgba(40, 40, 40, 0.95);
+}
+
+.mic-button.recording {
+  background: rgba(200, 30, 30, 0.85);
+  box-shadow: 0 0 12px rgba(255, 50, 50, 0.6);
+}
+
+.mic-button.loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.transcript-panel {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100% - 48px));
+  padding: 12px 18px;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #f0f0f0;
+  font: 500 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  z-index: 10;
+}
+
+.transcript-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.transcript-text {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.speak-button {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #3a3a3a;
+  border-radius: 50%;
+  background: rgba(30, 30, 30, 0.95);
+  color: #f0f0f0;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.speak-button:hover:not(:disabled) {
+  background: rgba(50, 50, 50, 0.95);
+}
+
+.speak-button.loading,
+.speak-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.transcript-lang {
+  display: block;
+  margin-bottom: 6px;
+  color: #88aaff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.transcript-question {
+  margin: 0 0 8px;
+  color: #c8c8c8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.transcript-status {
+  margin: 8px 0 0;
+  color: #88aaff;
+  font-size: 12px;
+  text-align: center;
+}
+
+.disappointment-message {
+  margin: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.disappointment-message--ar {
+  margin-bottom: 10px;
+  color: #f5d0a0;
+  font-size: 15px;
+}
+
+.disappointment-message--en {
+  color: #e8e8e8;
+  font-size: 14px;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.avatar-image {
+  display: block;
+  width: min(320px, 72vw);
+  height: auto;
+  max-height: min(480px, 62vh);
+  object-fit: contain;
+  border-radius: 12px;
+  background: #f7f7f7;
+}
+
+.avatar-image.is-leaving {
+  animation: avatar-leave 0.22s ease forwards;
+}
+
+.avatar-image.is-entering {
+  animation: avatar-enter 0.32s ease;
+}
+
+@keyframes avatar-leave {
+  to {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes avatar-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-image.is-leaving,
+  .avatar-image.is-entering {
+    animation: none;
+  }
+}
+
+.status-panel {
+  display: none;
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10;
+}
+
+.status-button {
+  min-width: 108px;
+  padding: 10px 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #f0f0f0;
+  font: 600 13px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.status-button:hover {
+  background: rgba(40, 40, 40, 0.95);
+}
+
+.status-button.is-active {
+  border-color: #88aaff;
+  background: rgba(30, 45, 70, 0.95);
+  color: #d8e6ff;
+}
+
+@media (max-width: 720px) {
+  .status-panel {
+    left: 50%;
+    top: auto;
+    bottom: 96px;
+    transform: translateX(-50%);
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: min(100%, 360px);
+  }
+
+  .status-button {
+    min-width: 0;
+    flex: 1 1 calc(50% - 5px);
+    text-align: center;
+  }
+}
