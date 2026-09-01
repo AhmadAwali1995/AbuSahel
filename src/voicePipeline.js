@@ -1,58 +1,74 @@
 /**
- * Streaming voice pipeline — ported from the `vvs` project
- * (github.com/MohammadHajjaj03/vvs, voice_pipeline.py).
+ * Direct translation of the vvs pipeline (github.com/MohammadHajjaj03/vvs,
+ * voice_pipeline.py + its INDEX_HTML script) into a module.
  *
- * Same method, different stack: vvs ran the whole flow through a FastAPI
- * backend (OpenAI STT + ElevenLabs TTS). Here everything stays in the browser
- * and reuses AbuSahel's existing Gemini modules, but the pipeline shape is
- * identical:
+ *   mic -> live browser transcript -> STT -> RAG (SSE) -> boundary-split
+ *       deltas -> FIFO TTS chunk queue -> audio
  *
- *   mic -> live browser transcript -> STT -> RAG (SSE stream)
- *       -> boundary-split answer deltas -> FIFO TTS chunk queue -> audio
+ * Function names and order follow the original so the two can be diffed:
+ * splitStableSpeechText, shouldFlushSpeechBuffer, appendSpeechDelta,
+ * flushSpeechBuffer, enqueueTtsChunk, prepareNextAudioChunk,
+ * warmNextQueuedChunk, pumpAudioQueue.
  *
- * The point of the design is that speech starts playing while the RAG answer
- * is still being generated, instead of waiting for the full answer.
+ * The server half lives in server/voiceApi.js and keeps the same routes vvs
+ * had: /api/stt, /api/ask-stream, /api/tts-chunk, /api/tts-stream/<id>.
  *
- * Usage:
- *   const pipeline = createVoicePipeline({
- *     onStatus, onTranscript, onAnswer, onTiming, onDebug,
- *   })
- *   await pipeline.start()   // begins recording
- *   await pipeline.stop()    // stops, transcribes, streams answer + speech
+ * Shares no module with the original AbuSahel app.
  */
 
-import { transcribeAudio } from './transcribe.js'
-import { speakText, stopSpeaking } from './speak.js'
+const RAG_STREAM_URL = '/api/ask-stream'
 
-const RAG_STREAM_URL =
-  import.meta.env.VITE_RAG_STREAM_URL ||
-  'https://faqragsystem-production-88c2.up.railway.app/query'
+// vvs thresholds, unchanged.
+const FLUSH_WORD_COUNT = 32
+const MIN_WORD_COUNT = 14
+const IDLE_FLUSH_MS = 1400
 
-// Chunking thresholds, carried over from vvs.
-const FLUSH_WORD_COUNT = 32 // force a TTS chunk once the buffer reaches this
-const MIN_WORD_COUNT = 14 // don't speak a chunk shorter than this unless forced
-const IDLE_FLUSH_MS = 1400 // ...unless the stream goes quiet for this long
-
-// Boundaries we're willing to cut a spoken chunk at (Arabic + Latin).
 const BOUNDARY_CHARS = [' ', '\n', '.', ',', '،', '؛', ';', ':', '!', '?', '؟']
 
-/* -------------------------------------------------------------------------
- * SSE parsing
- * `vvs` parsed the event stream twice — once in Python over the RAG response,
- * once in JS over its own backend stream. Only one parser is needed here.
- * ---------------------------------------------------------------------- */
+// The first chunk is allowed to be shorter than the rest: every second spent
+// filling it is a second of silence the listener sits through. It is still cut
+// at a clause or sentence boundary, so the delivery stays natural — the same
+// reason the splitter never cuts mid-word. Chunks after the first keep the vvs
+// thresholds, so the bulk of the answer is still spoken in full passages.
+const FIRST_CHUNK_MIN_WORDS = 6
+const FIRST_CHUNK_IDLE_MS = 400
+const CLAUSE_END = ['.', '،', '؛', ';', ':', '!', '?', '؟', '\n']
 
+/* ------------------------------------------------------------------ *
+ * Helpers                                                             *
+ * ------------------------------------------------------------------ */
+
+/** vvs: splitStableSpeechText — never cut a spoken chunk mid-word. */
+function splitStableSpeechText(text) {
+  let lastBoundary = -1
+  for (const char of BOUNDARY_CHARS) {
+    lastBoundary = Math.max(lastBoundary, text.lastIndexOf(char))
+  }
+  if (lastBoundary === -1) return { ready: '', carry: text }
+  return {
+    ready: text.slice(0, lastBoundary + 1),
+    carry: text.slice(lastBoundary + 1),
+  }
+}
+
+function wordCount(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+/** vvs: shouldFlushSpeechBuffer */
+function shouldFlushSpeechBuffer(text) {
+  return wordCount(text) >= FLUSH_WORD_COUNT
+}
+
+/** vvs: parseEvent — one SSE frame -> { event, payload }. */
 function parseSseBlock(rawEvent) {
   let eventName = 'message'
   const dataLines = []
 
   for (const line of rawEvent.split('\n')) {
     if (line.startsWith(':')) continue
-    if (line.startsWith('event:')) {
-      eventName = line.slice(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).replace(/^ /, ''))
-    }
+    if (line.startsWith('event:')) eventName = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''))
   }
 
   if (!dataLines.length) return null
@@ -64,18 +80,12 @@ function parseSseBlock(rawEvent) {
   } catch {
     payload = { text: raw }
   }
-  if (typeof payload !== 'object' || payload === null) {
-    payload = { value: payload }
-  }
+  if (typeof payload !== 'object' || payload === null) payload = { value: payload }
 
   return { event: eventName, payload }
 }
 
-/**
- * POSTs the question and yields `{ event, payload }` for each SSE frame.
- * Falls back to a single synthetic `delta` + `final` pair if the endpoint
- * answers with plain JSON instead of a stream — same fallback vvs had.
- */
+/** vvs: stream_rag_sse — yields each frame as it arrives. */
 async function* streamRagSse(text, signal) {
   const response = await fetch(RAG_STREAM_URL, {
     method: 'POST',
@@ -85,18 +95,8 @@ async function* streamRagSse(text, signal) {
   })
 
   if (!response.ok) {
-    throw new Error(`RAG API error (${response.status})`)
-  }
-
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('event-stream') || !response.body) {
-    const data = await response.json().catch(() => ({}))
-    const answer = (data.answer || data.text || data.response || '').trim()
-    if (!answer) throw new Error('No answer returned from RAG API')
-    yield { event: 'metadata', payload: { source: 'non-streaming' } }
-    yield { event: 'delta', payload: { text: answer } }
-    yield { event: 'final', payload: data }
-    return
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `RAG API error (${response.status})`)
   }
 
   const reader = response.body.getReader()
@@ -122,31 +122,28 @@ async function* streamRagSse(text, signal) {
   }
 }
 
-/* -------------------------------------------------------------------------
- * Boundary splitting — decides how much of the streamed answer is safe to
- * hand to TTS. Text after the last boundary is carried forward so a chunk
- * never ends mid-word.
- * ---------------------------------------------------------------------- */
+/** vvs: speech_to_text — POSTs the recording, gets the clean transcript back. */
+async function transcribeAudio(blob) {
+  const response = await fetch('/api/stt', {
+    method: 'POST',
+    headers: { 'Content-Type': blob.type || 'audio/webm' },
+    body: blob,
+  })
 
-function splitStableSpeechText(text) {
-  let lastBoundary = -1
-  for (const char of BOUNDARY_CHARS) {
-    lastBoundary = Math.max(lastBoundary, text.lastIndexOf(char))
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `Transcription failed (${response.status})`)
   }
-  if (lastBoundary === -1) return { ready: '', carry: text }
-  return {
-    ready: text.slice(0, lastBoundary + 1),
-    carry: text.slice(lastBoundary + 1),
-  }
+
+  const data = await response.json()
+  if (!data.text?.trim()) throw new Error('No transcription returned from OpenAI')
+
+  return { text: data.text.trim(), language: data.language === 'en' ? 'en' : 'ar' }
 }
 
-function wordCount(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-/* -------------------------------------------------------------------------
- * Pipeline
- * ---------------------------------------------------------------------- */
+/* ------------------------------------------------------------------ *
+ * Pipeline                                                            *
+ * ------------------------------------------------------------------ */
 
 export function createVoicePipeline({
   onStatus = () => {},
@@ -162,18 +159,20 @@ export function createVoicePipeline({
   let recognition = null
   let abortController = null
 
-  // live browser transcript (SpeechRecognition), shown while the user speaks
   let finalBrowserTranscript = ''
   let interimTranscript = ''
 
-  // answer + TTS chunking state
   let answerText = ''
   let speechBuffer = ''
   let speechCarry = ''
   let speechIdleTimer = null
-  let speechQueue = Promise.resolve()
 
-  // latency marks
+  // vvs kept exactly these four for the audio queue.
+  let chunkSequence = 0
+  let pendingChunks = []
+  let activeChunk = null
+  let ttsRequestInFlight = false
+
   let turnStart = 0
   const marks = {}
 
@@ -183,27 +182,38 @@ export function createVoicePipeline({
     onTiming({ ...marks })
   }
 
+  /* --- vvs: resetUi ------------------------------------------------- */
+
   function reset() {
     finalBrowserTranscript = ''
     interimTranscript = ''
     answerText = ''
     speechBuffer = ''
     speechCarry = ''
-    speechQueue = Promise.resolve()
+
     if (speechIdleTimer) {
       clearTimeout(speechIdleTimer)
       speechIdleTimer = null
     }
+
+    activeChunk?.audio?.pause()
+    for (const chunk of pendingChunks) {
+      chunk.audio?.pause()
+      chunk.audio?.removeAttribute('src')
+    }
+    chunkSequence = 0
+    pendingChunks = []
+    activeChunk = null
+    ttsRequestInFlight = false
+
     for (const key of Object.keys(marks)) delete marks[key]
     turnStart = 0
-    stopSpeaking()
   }
 
-  /* --- live transcript ---------------------------------------------- */
+  /* --- live transcript (browser SpeechRecognition) ------------------ */
 
   function setupRecognition() {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) return null
 
     const instance = new SpeechRecognition()
@@ -229,30 +239,48 @@ export function createVoicePipeline({
     return instance
   }
 
-  /* --- FIFO TTS queue ------------------------------------------------ */
-  // vvs kept an explicit array of pre-warmed <audio> elements because
-  // ElevenLabs streamed bytes. Gemini TTS returns a whole clip, so a serial
-  // promise chain gives the same guarantee: chunks play in order, and the
-  // next chunk is requested as soon as the previous one finishes.
+  /* --- vvs: the speech buffer --------------------------------------- */
 
-  function enqueueSpeech(text) {
-    speechQueue = speechQueue
-      .then(async () => {
-        mark('firstTtsRequest')
-        await speakText(text, language)
-        mark('firstAudible')
-      })
-      .catch((error) => {
-        onDebug(`TTS chunk failed: ${error.message}`)
-      })
-    return speechQueue
+  /** vvs: appendSpeechDelta */
+  function appendSpeechDelta(deltaText) {
+    if (!deltaText) return
+
+    const { ready, carry } = splitStableSpeechText(speechCarry + deltaText)
+    speechBuffer += ready
+    speechCarry = carry
+
+    if (speechIdleTimer) clearTimeout(speechIdleTimer)
+
+    const isFirstChunk = chunkSequence === 0
+
+    if (shouldFlushSpeechBuffer(speechBuffer)) {
+      void flushSpeechBuffer(false)
+      return
+    }
+
+    // Start speaking as soon as the first clause is complete.
+    if (
+      isFirstChunk &&
+      wordCount(speechBuffer) >= FIRST_CHUNK_MIN_WORDS &&
+      CLAUSE_END.some((mark) => speechBuffer.trimEnd().endsWith(mark))
+    ) {
+      void flushSpeechBuffer(false)
+      return
+    }
+
+    speechIdleTimer = setTimeout(
+      () => void flushSpeechBuffer(false),
+      isFirstChunk ? FIRST_CHUNK_IDLE_MS : IDLE_FLUSH_MS,
+    )
   }
 
+  /** vvs: flushSpeechBuffer */
   function flushSpeechBuffer(force) {
     if (speechIdleTimer) {
       clearTimeout(speechIdleTimer)
       speechIdleTimer = null
     }
+
     if (force && speechCarry) {
       speechBuffer += speechCarry
       speechCarry = ''
@@ -261,36 +289,152 @@ export function createVoicePipeline({
     const text = speechBuffer.trim()
     if (!text) return
 
-    if (!force && wordCount(text) < MIN_WORD_COUNT) {
-      speechIdleTimer = setTimeout(() => flushSpeechBuffer(false), IDLE_FLUSH_MS)
+    const isFirstChunk = chunkSequence === 0
+    const minimum = isFirstChunk ? FIRST_CHUNK_MIN_WORDS : MIN_WORD_COUNT
+
+    if (!force && wordCount(text) < minimum) {
+      speechIdleTimer = setTimeout(
+        () => void flushSpeechBuffer(false),
+        isFirstChunk ? FIRST_CHUNK_IDLE_MS : IDLE_FLUSH_MS,
+      )
       return
     }
 
     speechBuffer = ''
-    enqueueSpeech(text)
+    enqueueTtsChunk(text)
   }
 
-  function appendSpeechDelta(deltaText) {
-    if (!deltaText) return
-    const { ready, carry } = splitStableSpeechText(speechCarry + deltaText)
-    speechBuffer += ready
-    speechCarry = carry
+  /* --- vvs: the FIFO audio queue ------------------------------------ */
 
-    if (speechIdleTimer) clearTimeout(speechIdleTimer)
+  /** vvs: enqueueTtsChunk */
+  function enqueueTtsChunk(text) {
+    pendingChunks.push({ seq: chunkSequence++, text, audio: null, ready: false })
+    pendingChunks.sort((a, b) => a.seq - b.seq)
+    void pumpAudioQueue()
+    void warmNextQueuedChunk()
+  }
 
-    if (wordCount(speechBuffer) >= FLUSH_WORD_COUNT) {
-      flushSpeechBuffer(false)
-    } else {
-      speechIdleTimer = setTimeout(() => flushSpeechBuffer(false), IDLE_FLUSH_MS)
+  function dropChunk(chunk) {
+    pendingChunks = pendingChunks.filter((item) => item !== chunk)
+    if (activeChunk === chunk) activeChunk = null
+  }
+
+  /**
+   * vvs: prepareNextAudioChunk — reserve a stream id, then point an <audio> at
+   * the GET route. Streaming from a URL is what makes playback start on the
+   * first bytes instead of after the whole clip downloads.
+   */
+  async function prepareNextAudioChunk(chunk) {
+    ttsRequestInFlight = true
+
+    let response
+    try {
+      response = await fetch('/api/tts-chunk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunk.text }),
+      })
+    } catch {
+      onDebug('Failed to reach the TTS service.')
+      dropChunk(chunk)
+      ttsRequestInFlight = false
+      void pumpAudioQueue()
+      return
     }
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      onDebug(err.error || 'Failed to queue a TTS chunk.')
+      dropChunk(chunk)
+      ttsRequestInFlight = false
+      void pumpAudioQueue()
+      return
+    }
+
+    const payload = await response.json()
+    mark('firstTtsRequest')
+
+    chunk.audio = new Audio(`/api/tts-stream/${encodeURIComponent(payload.stream_id)}`)
+    chunk.audio.preload = 'auto'
+
+    const markReady = () => {
+      chunk.ready = true
+      mark('firstAudioByte')
+      void pumpAudioQueue()
+      void warmNextQueuedChunk()
+    }
+    chunk.audio.onloadeddata = markReady
+    chunk.audio.oncanplay = markReady
+
+    chunk.audio.onplaying = () => {
+      mark('firstAudible')
+      void warmNextQueuedChunk()
+    }
+
+    chunk.audio.onended = () => {
+      dropChunk(chunk)
+      void pumpAudioQueue()
+      void warmNextQueuedChunk()
+    }
+
+    chunk.audio.onerror = () => {
+      // ElevenLabs answers 200 with an empty body for a very short tail; skip
+      // that chunk rather than stalling the queue.
+      dropChunk(chunk)
+      void pumpAudioQueue()
+      void warmNextQueuedChunk()
+    }
+
+    chunk.audio.load()
+    ttsRequestInFlight = false
   }
 
-  /* --- public API ----------------------------------------------------- */
+  /** vvs: warmNextQueuedChunk — fetch the next chunk while this one plays. */
+  async function warmNextQueuedChunk() {
+    if (ttsRequestInFlight) return
+    const waiting = pendingChunks.find((chunk) => chunk !== activeChunk && !chunk.audio)
+    if (!waiting) return
+    await prepareNextAudioChunk(waiting)
+  }
+
+  /** vvs: pumpAudioQueue — play strictly in sequence order. */
+  async function pumpAudioQueue() {
+    if (activeChunk || ttsRequestInFlight) return
+
+    const next = pendingChunks[0]
+    if (!next) return
+
+    if (!next.audio) {
+      await prepareNextAudioChunk(next)
+      return
+    }
+    if (!next.ready) return
+
+    activeChunk = next
+    next.audio.play().catch(() => {
+      onDebug('The browser blocked autoplay. Interact with the page first.')
+      dropChunk(next)
+      void pumpAudioQueue()
+    })
+    void warmNextQueuedChunk()
+  }
+
+  function waitForSpeechToFinish() {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (!pendingChunks.length && !activeChunk && !ttsRequestInFlight) resolve()
+        else setTimeout(check, 120)
+      }
+      check()
+    })
+  }
+
+  /* --- recording ---------------------------------------------------- */
 
   async function start() {
     reset()
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' })
+    mediaRecorder = new MediaRecorder(mediaStream)
     audioChunks = []
 
     mediaRecorder.ondataavailable = (event) => {
@@ -328,10 +472,12 @@ export function createVoicePipeline({
       }
     }
 
-    return process(new Blob(audioChunks, { type: 'audio/webm' }))
+    return process(
+      new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }),
+    )
   }
 
-  /** STT -> streamed RAG -> chunked speech. Resolves when audio finishes. */
+  /** vvs: /api/process — STT, then stream the answer while speaking it. */
   async function process(blob) {
     turnStart = performance.now()
     abortController = new AbortController()
@@ -384,7 +530,7 @@ export function createVoicePipeline({
 
       mark('ragTotal')
       flushSpeechBuffer(true)
-      await speechQueue
+      await waitForSpeechToFinish()
       mark('total')
 
       onStatus('done')

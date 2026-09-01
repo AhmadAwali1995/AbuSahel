@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Voice RAG — AbuSahel</title>
+  </head>
+  <body>
+    <div class="app">
+      <h1>أبو سهل — الصوت</h1>
+      <p class="sub">اضغط ابدأ التسجيل، احكِ، ثم أوقف. الإجابة تُنطق أثناء وصولها.</p>
+
+      <div class="controls">
+        <button id="startBtn" class="btn primary">ابدأ التسجيل</button>
+        <button id="stopBtn" class="btn" disabled>إيقاف وإرسال</button>
+        <span class="status"><span id="statusDot" class="dot"></span><span id="statusText">جاهز</span></span>
+      </div>
+
+      <section>
+        <h2>النص</h2>
+        <div id="transcriptBox" class="text-box"></div>
+      </section>
+
+      <section>
+        <h2>الإجابة</h2>
+        <div id="answerBox" class="text-box"></div>
+      </section>
+
+      <section>
+        <h2>الأزمنة</h2>
+        <div class="timings">
+          <div class="timing"><span>تحويل الصوت لنص</span><b id="t-stt">-</b></div>
+          <div class="timing"><span>أول جزء من الإجابة</span><b id="t-firstDelta">-</b></div>
+          <div class="timing"><span>أول طلب صوت</span><b id="t-firstTtsRequest">-</b></div>
+          <div class="timing"><span>أول صوت مسموع</span><b id="t-firstAudible">-</b></div>
+          <div class="timing"><span>إجمالي الـ RAG</span><b id="t-ragTotal">-</b></div>
+          <div class="timing"><span>الإجمالي</span><b id="t-total">-</b></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>تفاصيل</h2>
+        <pre id="debugBox" class="debug"></pre>
+      </section>
+    </div>
+
+    <script type="module" src="/src/voice.js"></script>
+  </body>
+</html>
