@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default defineConfig(({ mode }) => {
   // Third arg '' loads every var, not just VITE_-prefixed ones. These stay on
   // the server — they are never injected into the client bundle.
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
   const voiceApi = voiceApiMiddleware(env)
 
   return {
@@ -30,6 +30,9 @@ export default defineConfig(({ mode }) => {
           voice: resolve(__dirname, 'voice.html'),
         },
       },
+    },
+    preview: {
+      allowedHosts: true,
     },
     server: {
       proxy: {
