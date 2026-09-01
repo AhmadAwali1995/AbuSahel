@@ -108,13 +108,13 @@ export class LipSync {
     const tight = Math.min(1, midBand * 2.0 * (1 - volume * 0.35))
 
     const targets = {
-      Jaw_Open: openness * 0.55,
-      V_Open: openness * 0.5,
-      V_Lip_Open: openness * 0.42,
-      V_Wide: wide * 0.35 * volume,
-      V_Tight: tight * 0.3,
-      V_Dental_Lip: tight * 0.22,
-      Mouth_Close: Math.max(0, 0.12 - volume * 0.12),
+      V_Open: openness * 0.0,
+      V_Lip_Open: openness * 0.68,
+      V_Wide: wide * 0.42 * volume,
+      V_Tight: tight * 0.38,
+      V_Dental_Lip: tight * 0.32,
+      Mouth_Close: Math.max(0, 0.14 - volume * 0.14),
+      Jaw_Open: openness * 0.0,
     }
 
     for (const key of VISEME_TARGETS) {
