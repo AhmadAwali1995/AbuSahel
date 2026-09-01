@@ -3,9 +3,13 @@ import { createVoicePipeline } from './voicePipeline.js'
 
 const app = document.querySelector('#app')
 
+const stage = document.createElement('div')
+stage.className = 'stage'
+app.appendChild(stage)
+
 const avatar = document.createElement('div')
 avatar.className = 'avatar'
-app.appendChild(avatar)
+stage.appendChild(avatar)
 
 function createClip(src) {
   const video = document.createElement('video')
@@ -25,11 +29,16 @@ const clips = {
   speaking: createClip('/models/AbuSahelModel/AbuShlVideo.mp4'),
 }
 
-function setAvatarClip(name) {
+function setAvatarClip(name, { play = true } = {}) {
   for (const [key, video] of Object.entries(clips)) {
     const on = key === name
     video.classList.toggle('is-active', on)
-    if (on) {
+    if (!on) {
+      video.pause()
+      video.currentTime = 0
+      continue
+    }
+    if (play) {
       void video.play()
     } else {
       video.pause()
@@ -37,6 +46,8 @@ function setAvatarClip(name) {
     }
   }
 }
+
+setAvatarClip('thinking', { play: false })
 
 const micButton = document.createElement('button')
 micButton.type = 'button'
@@ -55,9 +66,13 @@ const pipeline = createVoicePipeline({
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
 
-    if (status === 'transcribing' || status === 'asking') setAvatarClip('thinking')
-    else if (status === 'answering') setAvatarClip('speaking')
-    else setAvatarClip(null)
+    if (status === 'transcribing' || status === 'asking') {
+      setAvatarClip('thinking', { play: true })
+    } else if (status === 'answering') {
+      setAvatarClip('speaking', { play: true })
+    } else {
+      setAvatarClip('thinking', { play: false })
+    }
 
     if (status === 'done' || status === 'idle' || status === 'error') {
       isBusy = false
@@ -87,16 +102,16 @@ micButton.addEventListener('click', async () => {
   isBusy = true
   micButton.classList.add('loading')
   micButton.classList.remove('recording')
-  setAvatarClip('thinking')
+  setAvatarClip('thinking', { play: true })
 
   try {
     await pipeline.stop()
   } catch (error) {
     console.error('Voice question failed:', error)
-    setAvatarClip(null)
+    setAvatarClip('thinking', { play: false })
   } finally {
     isBusy = false
     micButton.classList.remove('loading', 'recording')
-    setAvatarClip(null)
+    setAvatarClip('thinking', { play: false })
   }
 })
