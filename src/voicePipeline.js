@@ -151,6 +151,7 @@ export function createVoicePipeline({
   onAnswer = () => {},
   onTiming = () => {},
   onDebug = () => {},
+  onTtsAudio = () => {},
   language = 'ar',
 } = {}) {
   let mediaRecorder = null
@@ -411,6 +412,7 @@ export function createVoicePipeline({
     if (!next.ready) return
 
     activeChunk = next
+    onTtsAudio(next.audio)
     next.audio.play().catch(() => {
       onDebug('The browser blocked autoplay. Interact with the page first.')
       dropChunk(next)
