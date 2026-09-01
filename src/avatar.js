@@ -7,8 +7,34 @@ import {
   validateSkeleton,
 } from './avatarAnimations.js'
 import { LipSync } from './lipSync.js'
+import { EyeBlink } from './eyeBlink.js'
 
 const MODEL_URL = '/models/AbuSahelModel/AbuSahelModel.glb'
+
+/** Subtle resting eye pose — softer lids, less stare. */
+const RELAXED_EYE_WEIGHTS = {
+  Eye_Squint_L: 0.2,
+  Eye_Squint_R: 0.2,
+  Eye_Blink_L: 0.2,
+  Eye_Blink_R: 0.2,
+  Eyelash_Upper_Down_L: 0.14,
+  Eyelash_Upper_Down_R: 0.14,
+  Eye_Wide_L: 0,
+  Eye_Wide_R: 0,
+}
+
+function applyMorphWeights(morphMeshes, weights) {
+  for (const mesh of morphMeshes) {
+    const dict = mesh.morphTargetDictionary
+    const influences = mesh.morphTargetInfluences
+    if (!dict || !influences) continue
+
+    for (const [name, value] of Object.entries(weights)) {
+      const index = dict[name]
+      if (index !== undefined) influences[index] = value
+    }
+  }
+}
 
 /** Head-and-upper-chest framing. */
 function frameBustCamera(model, camera, container) {
@@ -62,6 +88,7 @@ export async function createAvatar(container) {
   const morphMeshes = []
   let model = null
   let lipSync = null
+  let eyeBlink = null
   let animationPlayer = null
   let rafId = 0
 
@@ -100,6 +127,8 @@ export async function createAvatar(container) {
   })
 
   lipSync = new LipSync(morphMeshes)
+  applyMorphWeights(morphMeshes, RELAXED_EYE_WEIGHTS)
+  eyeBlink = new EyeBlink(morphMeshes, { restBlink: RELAXED_EYE_WEIGHTS.Eye_Blink_L })
 
   frameBustCamera(model, camera, container)
 
@@ -121,6 +150,7 @@ export async function createAvatar(container) {
     rafId = requestAnimationFrame(tick)
     animationPlayer?.update()
     lipSync.update()
+    eyeBlink?.update()
     renderer.render(scene, camera)
   }
   tick()
