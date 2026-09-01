@@ -148,10 +148,27 @@ body,
 }
 
 .avatar {
+  position: relative;
+  width: min(420px, 78vw);
+  height: min(640px, 82vh);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1;
+}
+
+.avatar-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatar-video.is-active {
+  opacity: 1;
 }
 
 .avatar-image {
