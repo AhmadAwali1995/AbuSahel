@@ -1,53 +1,40 @@
 import './style.css'
+import { createAvatar } from './avatar.js'
 import { createVoicePipeline } from './voicePipeline.js'
+import { playTts } from './tts.js'
+
+const DEFAULT_TEST_TEXT = 'مرحباً، أنا أبو سهيل. كيف يمكنني مساعدتك اليوم؟'
 
 const app = document.querySelector('#app')
 
 const stage = document.createElement('div')
 stage.className = 'stage'
+stage.innerHTML = '<p class="stage-loading">Loading Abu Sahel…</p>'
 app.appendChild(stage)
 
-const avatar = document.createElement('div')
-avatar.className = 'avatar'
-stage.appendChild(avatar)
+const testPanel = document.createElement('div')
+testPanel.className = 'test-panel'
 
-function createClip(src) {
-  const video = document.createElement('video')
-  video.className = 'avatar-video'
-  video.src = src
-  video.loop = true
-  video.muted = true
-  video.playsInline = true
-  video.setAttribute('playsinline', '')
-  video.preload = 'auto'
-  avatar.appendChild(video)
-  return video
-}
+const testLabel = document.createElement('label')
+testLabel.className = 'test-label'
+testLabel.htmlFor = 'test-text'
+testLabel.textContent = 'نص تجريبي'
 
-const clips = {
-  thinking: createClip('/models/AbuSahelModel/AbuShlThinking.mp4'),
-  speaking: createClip('/models/AbuSahelModel/AbuShlVideo.mp4'),
-}
+const testTextarea = document.createElement('textarea')
+testTextarea.id = 'test-text'
+testTextarea.className = 'test-text'
+testTextarea.rows = 4
+testTextarea.dir = 'rtl'
+testTextarea.value = DEFAULT_TEST_TEXT
 
-function setAvatarClip(name, { play = true } = {}) {
-  for (const [key, video] of Object.entries(clips)) {
-    const on = key === name
-    video.classList.toggle('is-active', on)
-    if (!on) {
-      video.pause()
-      video.currentTime = 0
-      continue
-    }
-    if (play) {
-      void video.play()
-    } else {
-      video.pause()
-      video.currentTime = 0
-    }
-  }
-}
+const testVoiceButton = document.createElement('button')
+testVoiceButton.type = 'button'
+testVoiceButton.className = 'test-voice-button'
+testVoiceButton.textContent = 'Test voice'
+testVoiceButton.disabled = true
 
-setAvatarClip('thinking', { play: false })
+testPanel.append(testLabel, testTextarea, testVoiceButton)
+app.appendChild(testPanel)
 
 const micButton = document.createElement('button')
 micButton.type = 'button'
@@ -57,22 +44,26 @@ micButton.innerHTML = '🎤'
 micButton.title = 'Microphone'
 app.appendChild(micButton)
 
+let avatar = null
 let isRecording = false
 let isBusy = false
+let isTestPlaying = false
+
+try {
+  avatar = await createAvatar(stage)
+  stage.querySelector('.stage-loading')?.remove()
+  testVoiceButton.disabled = false
+} catch (error) {
+  console.error('Failed to load 3D model:', error)
+  const loading = stage.querySelector('.stage-loading')
+  if (loading) loading.textContent = 'Could not load 3D model.'
+}
 
 const pipeline = createVoicePipeline({
   onStatus(status) {
     micButton.classList.toggle('recording', status === 'listening')
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
-
-    if (status === 'transcribing' || status === 'asking') {
-      setAvatarClip('thinking', { play: true })
-    } else if (status === 'answering') {
-      setAvatarClip('speaking', { play: true })
-    } else {
-      setAvatarClip('thinking', { play: false })
-    }
 
     if (status === 'done' || status === 'idle' || status === 'error') {
       isBusy = false
@@ -81,6 +72,29 @@ const pipeline = createVoicePipeline({
       if (status !== 'listening') micButton.classList.remove('recording')
     }
   },
+})
+
+testVoiceButton.addEventListener('click', async () => {
+  if (isTestPlaying || !avatar) return
+
+  isTestPlaying = true
+  testVoiceButton.disabled = true
+  testVoiceButton.classList.add('loading')
+
+  try {
+    await playTts(testTextarea.value, {
+      onAudio: (audio) => {
+        void avatar.speak(audio)
+      },
+    })
+  } catch (error) {
+    console.error('Test voice failed:', error)
+  } finally {
+    avatar?.stopSpeaking()
+    isTestPlaying = false
+    testVoiceButton.disabled = !avatar
+    testVoiceButton.classList.remove('loading')
+  }
 })
 
 micButton.addEventListener('click', async () => {
@@ -102,16 +116,13 @@ micButton.addEventListener('click', async () => {
   isBusy = true
   micButton.classList.add('loading')
   micButton.classList.remove('recording')
-  setAvatarClip('thinking', { play: true })
 
   try {
     await pipeline.stop()
   } catch (error) {
     console.error('Voice question failed:', error)
-    setAvatarClip('thinking', { play: false })
   } finally {
     isBusy = false
     micButton.classList.remove('loading', 'recording')
-    setAvatarClip('thinking', { play: false })
   }
 })
