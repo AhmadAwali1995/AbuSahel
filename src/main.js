@@ -31,6 +31,12 @@ let avatar = null
 let isRecording = false
 let isBusy = false
 
+function resetMicIdle() {
+  isBusy = false
+  isRecording = false
+  micButton.classList.remove('loading', 'recording')
+}
+
 try {
   avatar = await createAvatar(stage)
   stage.querySelector('.stage-loading')?.remove()
@@ -44,15 +50,14 @@ try {
 const pipeline = createVoicePipeline({
   onStatus(status) {
     micButton.classList.toggle('recording', status === 'listening')
+    if (status === 'listening') isRecording = true
+
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
 
     if (status === 'done' || status === 'idle' || status === 'error') {
       avatar?.stopSpeaking()
-      isBusy = false
-      isRecording = status === 'listening'
-      micButton.classList.remove('loading')
-      if (status !== 'listening') micButton.classList.remove('recording')
+      resetMicIdle()
     }
   },
 
@@ -88,7 +93,6 @@ micButton.addEventListener('click', async () => {
     console.error('Voice question failed:', error)
     avatar?.stopSpeaking()
   } finally {
-    isBusy = false
-    micButton.classList.remove('loading', 'recording')
+    resetMicIdle()
   }
 })

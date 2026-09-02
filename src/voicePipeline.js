@@ -309,13 +309,20 @@ export function createVoicePipeline({
 
   /** vvs: enqueueTtsChunk */
   function enqueueTtsChunk(text) {
-    pendingChunks.push({ seq: chunkSequence++, text, audio: null, ready: false })
+    pendingChunks.push({
+      seq: chunkSequence++,
+      text,
+      audio: null,
+      ready: false,
+      enqueuedAt: performance.now(),
+    })
     pendingChunks.sort((a, b) => a.seq - b.seq)
     void pumpAudioQueue()
     void warmNextQueuedChunk()
   }
 
   function dropChunk(chunk) {
+    if (chunk.loadTimeout) clearTimeout(chunk.loadTimeout)
     pendingChunks = pendingChunks.filter((item) => item !== chunk)
     if (activeChunk === chunk) activeChunk = null
   }
@@ -359,6 +366,8 @@ export function createVoicePipeline({
     chunk.audio.preload = 'auto'
 
     const markReady = () => {
+      if (chunk.ready) return
+      if (chunk.loadTimeout) clearTimeout(chunk.loadTimeout)
       chunk.ready = true
       mark('firstAudioByte')
       void pumpAudioQueue()
@@ -385,6 +394,14 @@ export function createVoicePipeline({
       void pumpAudioQueue()
       void warmNextQueuedChunk()
     }
+
+    chunk.loadTimeout = setTimeout(() => {
+      if (!chunk.ready) {
+        onDebug('TTS chunk timed out while loading — skipping.')
+        dropChunk(chunk)
+        void pumpAudioQueue()
+      }
+    }, 12_000)
 
     chunk.audio.load()
     ttsRequestInFlight = false
@@ -421,12 +438,60 @@ export function createVoicePipeline({
     void warmNextQueuedChunk()
   }
 
+  function abandonAudioQueue() {
+    for (const chunk of pendingChunks) {
+      chunk.audio?.pause()
+      if (chunk.loadTimeout) clearTimeout(chunk.loadTimeout)
+    }
+    pendingChunks = []
+    activeChunk = null
+    ttsRequestInFlight = false
+  }
+
   function waitForSpeechToFinish() {
     return new Promise((resolve) => {
-      const check = () => {
-        if (!pendingChunks.length && !activeChunk && !ttsRequestInFlight) resolve()
-        else setTimeout(check, 120)
+      const deadline = performance.now() + 120_000
+
+      const finish = () => {
+        abandonAudioQueue()
+        resolve()
       }
+
+      const check = () => {
+        void pumpAudioQueue()
+
+        if (activeChunk?.audio?.ended) {
+          dropChunk(activeChunk)
+        }
+
+        const now = performance.now()
+        for (const chunk of [...pendingChunks]) {
+          if (!chunk.ready && now - chunk.enqueuedAt > 15_000) {
+            onDebug('TTS chunk stuck — skipping.')
+            dropChunk(chunk)
+          }
+        }
+
+        if (!pendingChunks.length && !activeChunk && !ttsRequestInFlight) {
+          resolve()
+          return
+        }
+
+        if (activeChunk?.audio && !activeChunk.audio.ended) {
+          activeChunk.audio.addEventListener('ended', check, { once: true })
+          if (now > deadline) finish()
+          else setTimeout(check, 200)
+          return
+        }
+
+        if (now > deadline) {
+          finish()
+          return
+        }
+
+        setTimeout(check, 120)
+      }
+
       check()
     })
   }
