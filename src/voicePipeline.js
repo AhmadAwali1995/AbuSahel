@@ -498,50 +498,102 @@ export function createVoicePipeline({
 
   /* --- recording ---------------------------------------------------- */
 
-  async function start() {
-    reset()
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    mediaRecorder = new MediaRecorder(mediaStream)
-    audioChunks = []
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) audioChunks.push(event.data)
+  /**
+   * SpeechRecognition on HTTPS holds a second mic capture, separate from
+   * getUserMedia. abort() drops it immediately; stop() can leave the tab
+   * indicator on until the engine finishes a phrase.
+   */
+  function abortRecognition() {
+    if (!recognition) return
+    try {
+      recognition.onresult = null
+      recognition.onend = null
+      recognition.onerror = null
+      recognition.abort()
+    } catch {
+      /* already stopped */
     }
-
-    recognition = setupRecognition()
-    if (recognition) {
-      try {
-        recognition.start()
-      } catch {
-        /* already running */
-      }
-    }
-
-    mediaRecorder.start()
-    onStatus('listening')
+    recognition = null
   }
 
-  async function stop() {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') return null
+  function stopMediaTracks() {
+    if (mediaStream) {
+      for (const track of mediaStream.getTracks()) {
+        track.stop()
+      }
+      mediaStream = null
+    }
+    mediaRecorder = null
+  }
 
-    const recorded = new Promise((resolve) => {
-      mediaRecorder.onstop = resolve
-    })
-    mediaRecorder.stop()
-    await recorded
-
-    mediaStream?.getTracks().forEach((track) => track.stop())
-    if (recognition) {
+  function releaseMic() {
+    abortRecognition()
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
-        recognition.stop()
+        mediaRecorder.stop()
       } catch {
         /* ignore */
       }
     }
+    stopMediaTracks()
+  }
 
-    return process(
-      new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }),
-    )
+  async function start() {
+    reset()
+    releaseMic()
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaRecorder = new MediaRecorder(mediaStream)
+      audioChunks = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunks.push(event.data)
+      }
+
+      recognition = setupRecognition()
+      if (recognition) {
+        try {
+          recognition.start()
+        } catch {
+          /* already running */
+        }
+      }
+
+      mediaRecorder.start()
+      onStatus('listening')
+    } catch (error) {
+      releaseMic()
+      throw error
+    }
+  }
+
+  async function stop() {
+    abortRecognition()
+
+    const recorder = mediaRecorder
+    const stream = mediaStream
+    const chunks = audioChunks
+    const mimeType = recorder?.mimeType || 'audio/webm'
+
+    if (recorder && recorder.state !== 'inactive') {
+      const recorded = new Promise((resolve) => {
+        recorder.addEventListener('stop', resolve, { once: true })
+      })
+      recorder.stop()
+      await recorded
+    }
+
+    if (stream) {
+      for (const track of stream.getTracks()) {
+        track.stop()
+      }
+    }
+    mediaStream = null
+    mediaRecorder = null
+
+    if (!chunks.length) return null
+
+    return process(new Blob(chunks, { type: mimeType }))
   }
 
   /** vvs: /api/process — STT, then stream the answer while speaking it. */
@@ -619,8 +671,7 @@ export function createVoicePipeline({
 
   function cancel() {
     abortController?.abort()
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop()
-    mediaStream?.getTracks().forEach((track) => track.stop())
+    releaseMic()
     reset()
     onStatus('idle')
   }
