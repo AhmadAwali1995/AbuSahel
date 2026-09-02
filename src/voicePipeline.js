@@ -597,10 +597,10 @@ export function createVoicePipeline({
 
       mark('ragTotal')
       flushSpeechBuffer(true)
-      await waitForSpeechToFinish()
-      mark('total')
-
       onStatus('done')
+
+      void waitForSpeechToFinish().then(() => mark('total'))
+
       return {
         question: transcript.text,
         language: transcript.language,
