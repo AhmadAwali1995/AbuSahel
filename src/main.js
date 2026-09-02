@@ -4,10 +4,19 @@ import { createVoicePipeline } from './voicePipeline.js'
 
 const app = document.querySelector('#app')
 
+const header = document.createElement('header')
+header.className = 'app-header'
+header.innerHTML = '<h1 class="app-header__title">نسخة تجريبية</h1>'
+app.appendChild(header)
+
 const stage = document.createElement('div')
 stage.className = 'stage'
 stage.innerHTML = '<p class="stage-loading">Loading Abu Sahel…</p>'
 app.appendChild(stage)
+
+const footer = document.createElement('footer')
+footer.className = 'app-footer'
+app.appendChild(footer)
 
 const micButton = document.createElement('button')
 micButton.type = 'button'
@@ -16,7 +25,7 @@ micButton.className = 'mic-button'
 micButton.innerHTML = '🎤'
 micButton.title = 'Microphone'
 micButton.disabled = true
-app.appendChild(micButton)
+footer.appendChild(micButton)
 
 let avatar = null
 let isRecording = false

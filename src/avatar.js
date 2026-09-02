@@ -36,18 +36,22 @@ function applyMorphWeights(morphMeshes, weights) {
   }
 }
 
-/** Head-and-upper-chest framing. */
-function frameBustCamera(model, camera, container) {
+/** Upper-torso portrait — head, shoulders, and top of thobe only. */
+function framePortraitCamera(model, camera, container) {
   const box = new THREE.Box3().setFromObject(model)
   const size = box.getSize(new THREE.Vector3())
   const center = box.getCenter(new THREE.Vector3())
 
-  const viewBottom = box.min.y + size.y * 0.58
-  const viewTop = box.max.y + size.y * 0.02
+  const viewBottom = box.min.y + size.y * 0.52
+  const viewTop = box.max.y + size.y * 0.035
   const viewHeight = viewTop - viewBottom
-  const viewWidth = size.x * 0.38
+  const viewWidth = size.x * 1.37
 
-  const target = new THREE.Vector3(center.x, (viewTop + viewBottom) / 2, center.z)
+  const target = new THREE.Vector3(
+    center.x,
+    (viewTop + viewBottom) / 2 + size.y * 0.045,
+    center.z,
+  )
 
   const width = container.clientWidth || 1
   const height = container.clientHeight || 1
@@ -57,7 +61,7 @@ function frameBustCamera(model, camera, container) {
 
   const distForHeight = (viewHeight / 2) / Math.tan(vFov / 2)
   const distForWidth = (viewWidth / 2) / Math.tan(hFov / 2)
-  const distance = Math.max(distForHeight, distForWidth) * 1.08
+  const distance = Math.max(distForHeight, distForWidth) * 0.96
 
   camera.position.set(target.x, target.y, target.z + distance)
   camera.lookAt(target)
@@ -65,10 +69,10 @@ function frameBustCamera(model, camera, container) {
 
 export async function createAvatar(container) {
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0xf7f7f7)
 
-  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100)
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100)
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer.setClearColor(0x000000, 0)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -114,6 +118,7 @@ export async function createAvatar(container) {
     console.warn('ANIMATION.glb contains no animation clips.')
   } else {
     animationPlayer = playLoopingAnimations(model, animationGltf.animations)
+    console.info('Playing idle animation:', animationPlayer.clipNames.join(', '))
   }
 
   model.traverse((child) => {
@@ -130,7 +135,7 @@ export async function createAvatar(container) {
   applyMorphWeights(morphMeshes, RELAXED_EYE_WEIGHTS)
   eyeBlink = new EyeBlink(morphMeshes, { restBlink: RELAXED_EYE_WEIGHTS.Eye_Blink_L })
 
-  frameBustCamera(model, camera, container)
+  framePortraitCamera(model, camera, container)
 
   function resize() {
     const width = container.clientWidth
@@ -139,7 +144,7 @@ export async function createAvatar(container) {
     camera.aspect = width / height
     camera.updateProjectionMatrix()
     renderer.setSize(width, height, false)
-    frameBustCamera(model, camera, container)
+    framePortraitCamera(model, camera, container)
   }
 
   const resizeObserver = new ResizeObserver(resize)

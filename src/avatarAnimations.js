@@ -30,12 +30,41 @@ export function validateSkeleton(root, expectedBoneNames) {
   return { ok: missing.length === 0, missing, found }
 }
 
-/** Apply every clip from ANIMATION.glb onto the character, looping continuously. */
+const IDLE_CLIP_PREFERENCES = [
+  '2563486400256_TempMotion_BAKED',
+  'TheChatBot|A|Default',
+  '2563486400256_TempMotion',
+]
+
+const IDLE_CLIP_PATTERNS = [/TempMotion_BAKED/i, /TheChatBot\|A\|Default/i, /TempMotion/i]
+
+/** Pick one idle clip — new ANIMATION.glb ships several; old file had only TempMotion_BAKED. */
+export function selectIdleClips(clips) {
+  if (!clips.length) return []
+
+  for (const preferredName of IDLE_CLIP_PREFERENCES) {
+    const exact = clips.find((clip) => clip.name === preferredName)
+    if (exact) return [exact]
+  }
+
+  for (const pattern of IDLE_CLIP_PATTERNS) {
+    const match = clips.find((clip) => pattern.test(clip.name))
+    if (match) return [match]
+  }
+
+  const filtered = clips.filter(
+    (clip) => !/tripo_node|Armature\.001\|Default/i.test(clip.name),
+  )
+  return filtered.length ? [filtered[0]] : [clips[0]]
+}
+
+/** Loop the selected idle clip from ANIMATION.glb onto the character. */
 export function playLoopingAnimations(model, clips) {
+  const idleClips = selectIdleClips(clips)
   const mixer = new THREE.AnimationMixer(model)
   const clock = new THREE.Clock()
 
-  const actions = clips.map((clip) => {
+  const actions = idleClips.map((clip) => {
     const action = mixer.clipAction(clip, model)
     action.setLoop(THREE.LoopRepeat)
     action.clampWhenFinished = false
@@ -46,6 +75,7 @@ export function playLoopingAnimations(model, clips) {
   return {
     mixer,
     actions,
+    clipNames: idleClips.map((clip) => clip.name),
     update() {
       mixer.update(clock.getDelta())
     },
