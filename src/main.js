@@ -11,7 +11,25 @@ app.appendChild(header)
 
 const stage = document.createElement('div')
 stage.className = 'stage'
-stage.innerHTML = '<p class="stage-loading">Loading Abu Sahel…</p>'
+stage.innerHTML = `
+  <div class="stage-frame" aria-hidden="true">
+    <span class="stage-frame__corner stage-frame__corner--tl"></span>
+    <span class="stage-frame__corner stage-frame__corner--tr"></span>
+    <span class="stage-frame__corner stage-frame__corner--bl"></span>
+    <span class="stage-frame__corner stage-frame__corner--br"></span>
+  </div>
+  <img
+    class="stage-logo"
+    src="/models/AbuSahelModel/mwafaq_logo.png"
+    alt="mwafq"
+  />
+  <img
+    class="stage-slogan"
+    src="/models/AbuSahelModel/slogan.png"
+    alt="أسهل .. أسرع .. أفضل"
+  />
+  <p class="stage-loading">Loading Abu Sahel…</p>
+`
 app.appendChild(stage)
 
 const footer = document.createElement('footer')
