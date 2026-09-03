@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import {
   ANIMATION_URL,
   loadExpectedBoneNames,
-  playLoopingAnimations,
+  createAnimationPlayer,
   validateSkeleton,
 } from './avatarAnimations.js'
 import { LipSync } from './lipSync.js'
@@ -117,8 +117,10 @@ export async function createAvatar(container) {
   if (!animationGltf.animations.length) {
     console.warn('ANIMATION.glb contains no animation clips.')
   } else {
-    animationPlayer = playLoopingAnimations(model, animationGltf.animations)
-    console.info('Playing idle animation:', animationPlayer.clipNames.join(', '))
+    animationPlayer = createAnimationPlayer(model, animationGltf.animations)
+    if (animationPlayer) {
+      console.info('Animation player ready — states: idle, think, talk1, talk2')
+    }
   }
 
   model.traverse((child) => {
@@ -161,6 +163,11 @@ export async function createAvatar(container) {
   tick()
 
   return {
+    /** Switch the body animation (idle / think / talk1 / talk2). */
+    setAnimationState(state) {
+      animationPlayer?.setState(state)
+    },
+
     /** Start lip-sync while the TTS audio element plays. */
     async speak(audio) {
       await lipSync.play(audio)

@@ -55,6 +55,15 @@ const pipeline = createVoicePipeline({
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
 
+    if (status === 'transcribing' || status === 'asking') {
+      avatar?.setAnimationState('think')
+    } else if (status === 'answering') {
+      const talk = Math.random() < 0.5 ? 'talk1' : 'talk2'
+      avatar?.setAnimationState(talk)
+    } else if (status === 'done' || status === 'idle' || status === 'error') {
+      avatar?.setAnimationState('idle')
+    }
+
     if (status === 'done') {
       resetMicIdle()
     } else if (status === 'idle' || status === 'error') {
