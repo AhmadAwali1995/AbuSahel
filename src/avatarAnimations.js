@@ -60,9 +60,7 @@ function selectSourceClip(clips) {
 
 /** Extract a looping subclip from a giant stitched animation. */
 function makeSubclip(sourceClip, name, startSec, endSec) {
-  const fps = sourceClip.tracks[0]
-    ? Math.round(sourceClip.tracks[0].times.length / sourceClip.duration)
-    : 30
+  const fps = 30
   const startFrame = Math.round(startSec * fps)
   const endFrame = Math.round(endSec * fps)
   return THREE.AnimationUtils.subclip(sourceClip.clone(), name, startFrame, endFrame, fps)

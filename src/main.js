@@ -61,11 +61,9 @@ const pipeline = createVoicePipeline({
       avatar?.setStatus('talking')
     }
 
-    if (status === 'done') {
-      avatar?.setStatus('idle')
-      resetMicIdle()
-    } else if (status === 'idle' || status === 'error') {
+    if (status === 'done' || status === 'idle' || status === 'error') {
       avatar?.stopSpeaking()
+      avatar?.setStatus('idle')
       resetMicIdle()
     }
   },

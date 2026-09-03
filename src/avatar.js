@@ -176,7 +176,6 @@ export async function createAvatar(container) {
 
     stopSpeaking() {
       lipSync.stop()
-      animationPlayer?.setStatus('idle')
     },
 
     dispose() {
