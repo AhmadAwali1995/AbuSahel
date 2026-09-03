@@ -55,9 +55,16 @@ const pipeline = createVoicePipeline({
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
 
+    // Start think animation when question is being processed
+    if (pending && !avatar?.isThinking) {
+      avatar?.toggleThinking()
+    }
+
     if (status === 'done') {
+      if (avatar?.isThinking) avatar.toggleThinking()
       resetMicIdle()
     } else if (status === 'idle' || status === 'error') {
+      if (avatar?.isThinking) avatar.toggleThinking()
       avatar?.stopSpeaking()
       resetMicIdle()
     }
@@ -65,6 +72,8 @@ const pipeline = createVoicePipeline({
 
   onTtsAudio(audio) {
     if (!avatar) return
+    // Stop thinking — answer has arrived
+    if (avatar.isThinking) avatar.toggleThinking()
     void avatar.speak(audio)
   },
 })

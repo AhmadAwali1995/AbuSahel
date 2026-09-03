@@ -160,6 +160,36 @@ export async function createAvatar(container) {
   }
   tick()
 
+  // -- Think animation support --
+  const THINK_URL = '/models/AbuSahelModel/think.glb'
+  let thinkAction = null
+  let isThinking = false
+
+  const thinkGltf = await loader.loadAsync(THINK_URL)
+  const thinkClip = thinkGltf.animations[0] ?? null
+  if (!thinkClip) console.warn('think.glb contains no animation clips.')
+
+  function startThinking() {
+    if (!thinkClip || !animationPlayer) return
+    isThinking = true
+    // fade out idle
+    animationPlayer.actions.forEach((a) => a.fadeOut(0.4))
+    // play think
+    thinkAction = animationPlayer.mixer.clipAction(thinkClip, model)
+    thinkAction.setLoop(THREE.LoopRepeat)
+    thinkAction.clampWhenFinished = false
+    thinkAction.reset().fadeIn(0.4).play()
+  }
+
+  function stopThinking() {
+    if (!thinkAction || !animationPlayer) return
+    isThinking = false
+    thinkAction.fadeOut(0.4)
+    // fade idle back in
+    animationPlayer.actions.forEach((a) => a.reset().fadeIn(0.4).play())
+    thinkAction = null
+  }
+
   return {
     /** Start lip-sync while the TTS audio element plays. */
     async speak(audio) {
@@ -169,6 +199,13 @@ export async function createAvatar(container) {
     stopSpeaking() {
       lipSync.stop()
     },
+
+    toggleThinking() {
+      if (isThinking) { stopThinking() } else { startThinking() }
+      return isThinking
+    },
+
+    get isThinking() { return isThinking },
 
     dispose() {
       cancelAnimationFrame(rafId)
