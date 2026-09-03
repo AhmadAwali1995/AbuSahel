@@ -160,52 +160,113 @@ export async function createAvatar(container) {
   }
   tick()
 
-  // -- Think animation support --
-  const THINK_URL = '/models/AbuSahelModel/think.glb'
-  let thinkAction = null
-  let isThinking = false
-
-  const thinkGltf = await loader.loadAsync(THINK_URL)
-  const thinkClip = thinkGltf.animations[0] ?? null
-  if (!thinkClip) console.warn('think.glb contains no animation clips.')
-
-  function startThinking() {
-    if (!thinkClip || !animationPlayer) return
-    isThinking = true
-    // fade out idle
-    animationPlayer.actions.forEach((a) => a.fadeOut(0.4))
-    // play think
-    thinkAction = animationPlayer.mixer.clipAction(thinkClip, model)
-    thinkAction.setLoop(THREE.LoopRepeat)
-    thinkAction.clampWhenFinished = false
-    thinkAction.reset().fadeIn(0.4).play()
+  // -- Overlay animations (think / talk) --
+  const OVERLAY_URLS = {
+    think: '/models/AbuSahelModel/think.glb',
+    talk_1: '/models/AbuSahelModel/talk_1.glb',
+    talk_confident: '/models/AbuSahelModel/talk_confident.glb',
+    uncut_animations: '/models/AbuSahelModel/uncut_animations.glb',
   }
 
-  function stopThinking() {
-    if (!thinkAction || !animationPlayer) return
-    isThinking = false
-    thinkAction.fadeOut(0.4)
-    // fade idle back in
+  const overlayClips = {}
+  const overlayGltfs = await Promise.all(
+    Object.entries(OVERLAY_URLS).map(async ([name, url]) => {
+      const gltf = await loader.loadAsync(url)
+      return [name, gltf]
+    }),
+  )
+  for (const [name, gltf] of overlayGltfs) {
+    overlayClips[name] = gltf.animations[0] ?? null
+    if (!overlayClips[name]) console.warn(`${name}.glb contains no animation clips.`)
+  }
+
+  let overlayAction = null
+  let activeOverlay = null
+
+  function stopOverlay() {
+    if (!overlayAction || !animationPlayer) {
+      activeOverlay = null
+      overlayAction = null
+      return
+    }
+    overlayAction.fadeOut(0.4)
     animationPlayer.actions.forEach((a) => a.reset().fadeIn(0.4).play())
-    thinkAction = null
+    overlayAction = null
+    activeOverlay = null
+  }
+
+  /** Play an overlay clip (no toggle). Returns active name or null. */
+  function playOverlay(name) {
+    if (!animationPlayer || !name) return null
+    if (name === activeOverlay) return activeOverlay
+
+    const clip = overlayClips[name]
+    if (!clip) return activeOverlay
+
+    if (overlayAction) {
+      overlayAction.fadeOut(0.4)
+    } else {
+      animationPlayer.actions.forEach((a) => a.fadeOut(0.4))
+    }
+
+    overlayAction = animationPlayer.mixer.clipAction(clip, model)
+    overlayAction.setLoop(THREE.LoopRepeat)
+    overlayAction.clampWhenFinished = false
+    overlayAction.reset().fadeIn(0.4).play()
+    activeOverlay = name
+    return activeOverlay
+  }
+
+  /** Play an overlay clip, or stop if name is null / already active. Returns active name or null. */
+  function setOverlay(name) {
+    if (!animationPlayer) return null
+    if (!name || name === activeOverlay) {
+      stopOverlay()
+      return null
+    }
+    return playOverlay(name)
   }
 
   return {
-    /** Start lip-sync while the TTS audio element plays. */
+    /** Start lip-sync + talk_1 while the TTS audio element plays. */
     async speak(audio) {
+      playOverlay('talk_1')
+      audio.addEventListener(
+        'ended',
+        () => {
+          if (activeOverlay === 'talk_1') stopOverlay()
+        },
+        { once: true },
+      )
       await lipSync.play(audio)
     },
 
     stopSpeaking() {
       lipSync.stop()
+      if (activeOverlay === 'talk_1') stopOverlay()
     },
 
     toggleThinking() {
-      if (isThinking) { stopThinking() } else { startThinking() }
-      return isThinking
+      setOverlay(activeOverlay === 'think' ? null : 'think')
+      return activeOverlay === 'think'
     },
 
-    get isThinking() { return isThinking },
+    get isThinking() {
+      return activeOverlay === 'think'
+    },
+
+    /** Toggle a test overlay (talk_confident, uncut_animations). */
+    toggleTalk(name) {
+      if (name !== 'talk_confident' && name !== 'uncut_animations') return false
+      setOverlay(activeOverlay === name ? null : name)
+      return activeOverlay === name
+    },
+
+    get activeTalk() {
+      return activeOverlay === 'talk_confident' || activeOverlay === 'uncut_animations'
+        ? activeOverlay
+        : null
+    },
 
     dispose() {
       cancelAnimationFrame(rafId)

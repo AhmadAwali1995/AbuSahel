@@ -27,6 +27,42 @@ micButton.title = 'Microphone'
 micButton.disabled = true
 footer.appendChild(micButton)
 
+const button1 = document.createElement('button')
+button1.type = 'button'
+button1.className = 'mic-button'
+button1.textContent = '1'
+button1.title = 'Toggle talk_confident animation'
+button1.disabled = true
+button1.style.marginLeft = '10px'
+footer.appendChild(button1)
+
+const button2 = document.createElement('button')
+button2.type = 'button'
+button2.className = 'mic-button'
+button2.textContent = '2'
+button2.title = 'Toggle uncut_animations'
+button2.disabled = true
+button2.style.marginLeft = '10px'
+footer.appendChild(button2)
+
+function syncTalkButtons() {
+  const active = avatar?.activeTalk ?? null
+  button1.classList.toggle('recording', active === 'talk_confident')
+  button2.classList.toggle('recording', active === 'uncut_animations')
+}
+
+button1.addEventListener('click', () => {
+  if (!avatar) return
+  avatar.toggleTalk('talk_confident')
+  syncTalkButtons()
+})
+
+button2.addEventListener('click', () => {
+  if (!avatar) return
+  avatar.toggleTalk('uncut_animations')
+  syncTalkButtons()
+})
+
 let avatar = null
 let isRecording = false
 let isBusy = false
@@ -41,6 +77,8 @@ try {
   avatar = await createAvatar(stage)
   stage.querySelector('.stage-loading')?.remove()
   micButton.disabled = false
+  button1.disabled = false
+  button2.disabled = false
 } catch (error) {
   console.error('Failed to load 3D model:', error)
   const loading = stage.querySelector('.stage-loading')
@@ -58,13 +96,16 @@ const pipeline = createVoicePipeline({
     // Start think animation when question is being processed
     if (pending && !avatar?.isThinking) {
       avatar?.toggleThinking()
+      syncTalkButtons()
     }
 
     if (status === 'done') {
       if (avatar?.isThinking) avatar.toggleThinking()
+      syncTalkButtons()
       resetMicIdle()
     } else if (status === 'idle' || status === 'error') {
       if (avatar?.isThinking) avatar.toggleThinking()
+      syncTalkButtons()
       avatar?.stopSpeaking()
       resetMicIdle()
     }
@@ -72,9 +113,9 @@ const pipeline = createVoicePipeline({
 
   onTtsAudio(audio) {
     if (!avatar) return
-    // Stop thinking — answer has arrived
-    if (avatar.isThinking) avatar.toggleThinking()
+    // speak() crossfades think → talk_1 and stops talk when audio ends
     void avatar.speak(audio)
+    syncTalkButtons()
   },
 })
 
