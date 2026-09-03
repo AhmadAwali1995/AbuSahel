@@ -55,7 +55,14 @@ const pipeline = createVoicePipeline({
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
 
+    if (status === 'transcribing' || status === 'asking') {
+      avatar?.setStatus('thinking')
+    } else if (status === 'answering') {
+      avatar?.setStatus('talking')
+    }
+
     if (status === 'done') {
+      avatar?.setStatus('idle')
       resetMicIdle()
     } else if (status === 'idle' || status === 'error') {
       avatar?.stopSpeaking()
