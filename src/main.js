@@ -11,7 +11,25 @@ app.appendChild(header)
 
 const stage = document.createElement('div')
 stage.className = 'stage'
-stage.innerHTML = '<p class="stage-loading">Loading Abu Sahel…</p>'
+stage.innerHTML = `
+  <div class="stage-frame" aria-hidden="true">
+    <span class="stage-frame__corner stage-frame__corner--tl"></span>
+    <span class="stage-frame__corner stage-frame__corner--tr"></span>
+    <span class="stage-frame__corner stage-frame__corner--bl"></span>
+    <span class="stage-frame__corner stage-frame__corner--br"></span>
+  </div>
+  <img
+    class="stage-logo"
+    src="/branding/mwafaq_logo.png"
+    alt="mwafq"
+  />
+  <img
+    class="stage-slogan"
+    src="/branding/slogan.png"
+    alt="أسهل .. أسرع .. أفضل"
+  />
+  <p class="stage-loading">Loading Abu Sahel…</p>
+`
 app.appendChild(stage)
 
 const footer = document.createElement('footer')
@@ -42,9 +60,9 @@ try {
   stage.querySelector('.stage-loading')?.remove()
   micButton.disabled = false
 } catch (error) {
-  console.error('Failed to load 3D model:', error)
+  console.error('Failed to load character:', error)
   const loading = stage.querySelector('.stage-loading')
-  if (loading) loading.textContent = 'Could not load 3D model.'
+  if (loading) loading.textContent = 'Could not load character.'
 }
 
 const pipeline = createVoicePipeline({
@@ -54,6 +72,10 @@ const pipeline = createVoicePipeline({
 
     const pending = status === 'transcribing' || status === 'asking' || status === 'answering'
     micButton.classList.toggle('loading', pending)
+
+    if (status === 'transcribing' || status === 'asking') {
+      avatar?.thinking()
+    }
 
     if (status === 'done') {
       resetMicIdle()
@@ -89,6 +111,7 @@ micButton.addEventListener('click', async () => {
   isBusy = true
   micButton.classList.add('loading')
   micButton.classList.remove('recording')
+  avatar?.thinking()
 
   try {
     await pipeline.stop()
