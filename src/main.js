@@ -41,7 +41,7 @@ micButton.type = 'button'
 micButton.id = 'mic-button'
 micButton.className = 'mic-button'
 micButton.innerHTML = '🎤'
-micButton.title = 'Microphone'
+micButton.title = 'Click to talk — stops when you finish speaking'
 micButton.disabled = true
 footer.appendChild(micButton)
 
@@ -53,6 +53,25 @@ function resetMicIdle() {
   isBusy = false
   isRecording = false
   micButton.classList.remove('loading', 'recording')
+}
+
+async function finishRecording() {
+  if (!isRecording || isBusy) return
+
+  isRecording = false
+  isBusy = true
+  micButton.classList.add('loading')
+  micButton.classList.remove('recording')
+  avatar?.thinking()
+
+  try {
+    await pipeline.stop()
+  } catch (error) {
+    console.error('Voice question failed:', error)
+    avatar?.stopSpeaking()
+  } finally {
+    resetMicIdle()
+  }
 }
 
 try {
@@ -89,36 +108,29 @@ const pipeline = createVoicePipeline({
     if (!avatar) return
     void avatar.speak(audio)
   },
+
+  // End of utterance: silence after speech triggers the same path as stop.
+  onSilence() {
+    void finishRecording()
+  },
 })
 
 micButton.addEventListener('click', async () => {
   if (isBusy) return
 
-  if (!isRecording) {
-    try {
-      avatar?.stopSpeaking()
-      await pipeline.start()
-      isRecording = true
-    } catch (error) {
-      console.error('Microphone access failed:', error)
-      isRecording = false
-      micButton.classList.remove('recording')
-    }
+  // Second click while listening still cancels/sends early if needed.
+  if (isRecording) {
+    await finishRecording()
     return
   }
 
-  isRecording = false
-  isBusy = true
-  micButton.classList.add('loading')
-  micButton.classList.remove('recording')
-  avatar?.thinking()
-
   try {
-    await pipeline.stop()
-  } catch (error) {
-    console.error('Voice question failed:', error)
     avatar?.stopSpeaking()
-  } finally {
-    resetMicIdle()
+    await pipeline.start()
+    isRecording = true
+  } catch (error) {
+    console.error('Microphone access failed:', error)
+    isRecording = false
+    micButton.classList.remove('recording')
   }
 })

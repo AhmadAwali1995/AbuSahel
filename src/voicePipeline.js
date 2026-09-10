@@ -1,3 +1,5 @@
+import { startSilenceMonitor } from './silenceMonitor.js'
+
 /**
  * Direct translation of the vvs pipeline (github.com/MohammadHajjaj03/vvs,
  * voice_pipeline.py + its INDEX_HTML script) into a module.
@@ -152,12 +154,15 @@ export function createVoicePipeline({
   onTiming = () => {},
   onDebug = () => {},
   onTtsAudio = () => {},
+  onSilence = null,
   language = 'ar',
+  silence = {},
 } = {}) {
   let mediaRecorder = null
   let mediaStream = null
   let audioChunks = []
   let recognition = null
+  let silenceMonitor = null
   let abortController = null
 
   let finalBrowserTranscript = ''
@@ -517,6 +522,10 @@ export function createVoicePipeline({
   }
 
   function stopMediaTracks() {
+    if (silenceMonitor) {
+      silenceMonitor.stop()
+      silenceMonitor = null
+    }
     if (mediaStream) {
       for (const track of mediaStream.getTracks()) {
         track.stop()
@@ -528,6 +537,10 @@ export function createVoicePipeline({
 
   function releaseMic() {
     abortRecognition()
+    if (silenceMonitor) {
+      silenceMonitor.stop()
+      silenceMonitor = null
+    }
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
         mediaRecorder.stop()
@@ -561,6 +574,17 @@ export function createVoicePipeline({
 
       mediaRecorder.start()
       onStatus('listening')
+
+      if (typeof onSilence === 'function') {
+        silenceMonitor = startSilenceMonitor(
+          mediaStream,
+          () => {
+            silenceMonitor = null
+            onSilence()
+          },
+          silence,
+        )
+      }
     } catch (error) {
       releaseMic()
       throw error
@@ -568,6 +592,10 @@ export function createVoicePipeline({
   }
 
   async function stop() {
+    if (silenceMonitor) {
+      silenceMonitor.stop()
+      silenceMonitor = null
+    }
     abortRecognition()
 
     const recorder = mediaRecorder
